@@ -28,8 +28,26 @@ node /root/.copilot/skills/pr-agent/commentPR.js --project MYPROJECT --repoSlug 
 # Get PR details (includes current title/description)
 node /root/.copilot/skills/pr-agent/getPRDetails.js --project MYPROJECT --repoSlug my-repo --pullRequestId 123
 
-# Update PR title/description
-node /root/.copilot/skills/pr-agent/updatePR.js --project MYPROJECT --repoSlug my-repo --pullRequestId 123 --title "New PR title" --description "Updated PR description"
+# Update PR title only
+node /root/.copilot/skills/pr-agent/updatePR.js --project MYPROJECT --repoSlug my-repo --pullRequestId 123 --title "New PR title"
+
+# Update PR description with inline text (single line or safely quoted)
+node /root/.copilot/skills/pr-agent/updatePR.js --project MYPROJECT --repoSlug my-repo --pullRequestId 123 --description "Updated PR description"
+
+# Update PR description from a markdown/text file (recommended for multiline content)
+node /root/.copilot/skills/pr-agent/updatePR.js --project MYPROJECT --repoSlug my-repo --pullRequestId 123 --description-file /tmp/pr-description.md
+
+# Update PR description from stdin (recommended for generated content)
+cat /tmp/pr-description.md | node /root/.copilot/skills/pr-agent/updatePR.js --project MYPROJECT --repoSlug my-repo --pullRequestId 123 --description-stdin
+
+# Update both title and description file in one command
+node /root/.copilot/skills/pr-agent/updatePR.js --project MYPROJECT --repoSlug my-repo --pullRequestId 123 --title "New PR title" --description-file /tmp/pr-description.md
+
+# Create a new PR (title + refs required)
+node /root/.copilot/skills/pr-agent/createPR.js --project MYPROJECT --repoSlug my-repo --title "ABC-1234 Fix sample issue" --fromRef feature/ABC-1234-fix --toRef release/main --description "PR description"
+
+# Create PR with multiline description from file
+node /root/.copilot/skills/pr-agent/createPR.js --project MYPROJECT --repoSlug my-repo --title "ABC-1234 Fix sample issue" --fromRef feature/ABC-1234-fix --toRef release/main --description-file /tmp/pr-description.md
 
 # Get PR changes
 node /root/.copilot/skills/pr-agent/getPRChanges.js --project MYPROJECT --repoSlug my-repo --pullRequestId 123
@@ -48,6 +66,12 @@ node /root/.copilot/skills/pr-agent/commentLine.js --project MYPROJECT --repoSlu
 ```
 
 All scripts output JSON to stdout and errors to stderr. Required arguments are validated and must be provided as shown above.
+
+For `updatePR.js`:
+- Required: `--project`, `--repoSlug`, `--pullRequestId`
+- At least one update field is required: `--title` or one description source
+- Description sources are mutually exclusive: use only one of `--description`, `--description-file`, or `--description-stdin`
+- Both `--flag value` and `--flag=value` formats are accepted
 
 ## Usage
 Set the following environment variables for authentication:

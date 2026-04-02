@@ -8,7 +8,7 @@ const http = require('http');
 
 // --- Bitbucket API helpers ---
 const BITBUCKET_BASE_URL = process.env.BITBUCKET_BASE_URL || 'https://bitbucket.cambiumnetworks.com';
-const BITBUCKET_API_VERSION = process.env.BITBUCKET_API_VERSION || '1.0';
+const BITBUCKET_API_VERSION = process.env.BITBUCKET_API_VERSION || 'latest';
 const BITBUCKET_TOKEN = process.env.BITBUCKET_TOKEN;
 
 function getAuthHeader() {
@@ -17,30 +17,41 @@ function getAuthHeader() {
 }
 
 
-function bitbucketRequest(path, method = 'GET', body = null) {
+function bitbucketRequest(path, method = 'GET', body = null, options = {}) {
     return new Promise((resolve, reject) => {
+        const { rawResponse = false, accept = 'application/json' } = options;
         const urlObj = new URL(`${BITBUCKET_BASE_URL}/rest/api/${BITBUCKET_API_VERSION}${path}`);
         const isHttps = urlObj.protocol === 'https:';
         const lib = isHttps ? https : http;
-        const options = {
+        const headers = {
+            ...getAuthHeader(),
+            'Accept': accept,
+        };
+        if (body !== null) {
+            headers['Content-Type'] = 'application/json';
+        }
+        const requestOptions = {
             method,
             hostname: urlObj.hostname,
             port: urlObj.port || (isHttps ? 443 : 80),
             path: urlObj.pathname + urlObj.search,
-            headers: {
-                'Content-Type': 'application/json',
-                ...getAuthHeader(),
-            },
+            headers,
         };
-        // Debug: print headers before sending request
-        console.log('Bitbucket API Request Headers:', options.headers);
-        const req = lib.request(options, (res) => {
+        const req = lib.request(requestOptions, (res) => {
             let data = '';
             res.on('data', (chunk) => { data += chunk; });
             res.on('end', () => {
                 if (res.statusCode < 200 || res.statusCode >= 300) {
                     console.error(`Bitbucket API error: ${res.statusCode} ${res.statusMessage} | URL: ${urlObj.toString()}`);
-                    return reject(new Error(`Bitbucket API error: ${res.statusCode} ${res.statusMessage}`));
+                    return reject(new Error(`Bitbucket API error: ${res.statusCode} ${res.statusMessage} - ${data}`));
+                }
+                if (rawResponse) {
+                    resolve(data);
+                    return;
+                }
+                if (!data) {
+                    resolve({});
+                    return;
                 }
                 try {
                     resolve(JSON.parse(data));
@@ -66,14 +77,66 @@ module.exports = {
     async get_pr_details({ project, repoSlug, pullRequestId }) {
         return bitbucketRequest(`/projects/${project}/repos/${repoSlug}/pull-requests/${pullRequestId}`);
     },
-    async update_pr({ project, repoSlug, pullRequestId, title, description }) {
-        const body = {};
-        if (typeof title === 'string') body.title = title;
-        if (typeof description === 'string') body.description = description;
+    async create_pr({ project, repoSlug, title, description, fromRef, toRef, reviewers = [] }) {
+        if (typeof title !== 'string' || !title.trim()) {
+            throw new Error('title must be a non-empty string');
+        }
+        if (typeof fromRef !== 'string' || !fromRef.trim()) {
+            throw new Error('fromRef must be a non-empty string (branch name or refs/heads/*)');
+        }
+        if (typeof toRef !== 'string' || !toRef.trim()) {
+            throw new Error('toRef must be a non-empty string (branch name or refs/heads/*)');
+        }
 
-        if (!Object.keys(body).length) {
+        const normalizeRef = (ref) => ref.startsWith('refs/heads/') ? ref : `refs/heads/${ref}`;
+        const fromRefId = normalizeRef(fromRef.trim());
+        const toRefId = normalizeRef(toRef.trim());
+
+        const body = {
+            title: title.trim(),
+            fromRef: {
+                id: fromRefId,
+                repository: {
+                    slug: repoSlug,
+                    project: { key: project }
+                }
+            },
+            toRef: {
+                id: toRefId,
+                repository: {
+                    slug: repoSlug,
+                    project: { key: project }
+                }
+            },
+            ...(typeof description === 'string' ? { description } : {}),
+            ...(Array.isArray(reviewers) && reviewers.length > 0
+                ? {
+                    reviewers: reviewers
+                        .filter((name) => typeof name === 'string' && name.trim())
+                        .map((name) => ({ user: { name: name.trim() } }))
+                }
+                : {})
+        };
+
+        return bitbucketRequest(
+            `/projects/${project}/repos/${repoSlug}/pull-requests`,
+            'POST',
+            body
+        );
+    },
+    async update_pr({ project, repoSlug, pullRequestId, title, description }) {
+        if (typeof title !== 'string' && typeof description !== 'string') {
             throw new Error('At least one of title or description must be provided');
         }
+
+        // Bitbucket Server expects optimistic locking with the current PR version.
+        const currentPr = await module.exports.get_pr_details({ project, repoSlug, pullRequestId });
+
+        const body = {
+            version: currentPr.version,
+            ...(typeof title === 'string' ? { title } : {}),
+            ...(typeof description === 'string' ? { description } : {}),
+        };
 
         return bitbucketRequest(
             `/projects/${project}/repos/${repoSlug}/pull-requests/${pullRequestId}`,
@@ -304,14 +367,38 @@ module.exports = {
         return bitbucketRequest(`/projects/${project}/repos/${repoSlug}/pull-requests/${pullRequestId}/comments`, 'POST', { text: comment });
     },
     async comment_line({ project, repoSlug, pullRequestId, filePath, lineNumber, comment, lineType, severity }) {
+        const parsedLine = Number(lineNumber);
         return bitbucketRequest(`/projects/${project}/repos/${repoSlug}/pull-requests/${pullRequestId}/comments`, 'POST', {
             text: comment,
-            anchor: { fileType: 'TO', path: filePath, line: lineNumber, lineType, severity }
+            anchor: { fileType: 'TO', path: filePath, line: parsedLine, lineType, severity }
         });
     },
     async get_file_content({ project, repoSlug, pullRequestId, filePath, side }) {
-        // side: FROM or TO
-        return bitbucketRequest(`/projects/${project}/repos/${repoSlug}/pull-requests/${pullRequestId}/diff/${filePath}?withComments=false&contextLines=0`);
+        const normalizedSide = String(side || '').toUpperCase();
+        if (normalizedSide !== 'FROM' && normalizedSide !== 'TO') {
+            throw new Error('side must be FROM or TO');
+        }
+
+        const pr = await module.exports.get_pr_details({ project, repoSlug, pullRequestId });
+        const commit = normalizedSide === 'FROM'
+            ? pr && pr.fromRef && pr.fromRef.latestCommit
+            : pr && pr.toRef && pr.toRef.latestCommit;
+
+        if (!commit) {
+            throw new Error(`Could not resolve ${normalizedSide} commit for pull request ${pullRequestId}`);
+        }
+
+        const encodedPath = String(filePath)
+            .split('/')
+            .map((segment) => encodeURIComponent(segment))
+            .join('/');
+
+        return bitbucketRequest(
+            `/projects/${project}/repos/${repoSlug}/raw/${encodedPath}?at=${encodeURIComponent(commit)}`,
+            'GET',
+            null,
+            { rawResponse: true, accept: '*/*' }
+        );
     },
     async get_single_file_diff({ project, repoSlug, pullRequestId, filePath }) {
         return bitbucketRequest(`/projects/${project}/repos/${repoSlug}/pull-requests/${pullRequestId}/diff/${filePath}`);

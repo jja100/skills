@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// updatePR.js - CLI for updating Bitbucket PR title/description via prAgent.js
+// createPR.js - CLI for creating Bitbucket PR via prAgent.js
 
 const prAgent = require('./prAgent');
 const fs = require('fs');
@@ -31,7 +31,7 @@ function parseArgs(argv) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const required = ['project', 'repoSlug', 'pullRequestId'];
+  const required = ['project', 'repoSlug', 'title', 'fromRef', 'toRef'];
   for (const key of required) {
     if (!args[key]) {
       process.stderr.write(`Missing required argument --${key}\n`);
@@ -42,11 +42,6 @@ async function main() {
   const hasInlineDescription = typeof args.description === 'string';
   const hasDescriptionFile = typeof args['description-file'] === 'string';
   const hasDescriptionStdin = !!args['description-stdin'];
-
-  if (!args.title && !hasInlineDescription && !hasDescriptionFile && !hasDescriptionStdin) {
-    process.stderr.write('At least one of --title, --description, --description-file, or --description-stdin must be provided\n');
-    process.exit(1);
-  }
 
   const descriptionSourceCount = [hasInlineDescription, hasDescriptionFile, hasDescriptionStdin].filter(Boolean).length;
   if (descriptionSourceCount > 1) {
@@ -71,13 +66,19 @@ async function main() {
     }
   }
 
+  const reviewers = typeof args.reviewers === 'string'
+    ? args.reviewers.split(',').map((r) => r.trim()).filter(Boolean)
+    : [];
+
   try {
-    const result = await prAgent.update_pr({
+    const result = await prAgent.create_pr({
       project: args.project,
       repoSlug: args.repoSlug,
-      pullRequestId: args.pullRequestId,
       title: args.title,
       description,
+      fromRef: args.fromRef,
+      toRef: args.toRef,
+      reviewers,
     });
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
   } catch (err) {
