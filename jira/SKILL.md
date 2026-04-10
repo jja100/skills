@@ -27,6 +27,7 @@ JavaScript helper for Jira REST API. Requires `JIRA_TOKEN` or `PERSONAL_TOKEN` i
 - `getIssue(issueKey, fields)`
 - `getIssueDetails(issueKey)`
 - `resolveAcceptanceCriteriaFieldIds()`
+- `resolveRootCauseFieldIds()`
 - `checkIssue.js --key ISSUE-12345` for checklist-style hygiene audit
 - `createIssue(issueData)`
 - `updateIssue(issueKey, updateData)`
@@ -82,3 +83,50 @@ Use `fetchIssues.js` when you need to gather multiple tickets from JQL, explicit
 - `JIRA_TOKEN` or `PERSONAL_TOKEN` for Jira bearer auth
 - `JIRA_DOMAIN` optionally overrides the default `jira.cambiumnetworks.com`
 - `JIRA_ACCEPTANCE_CRITERIA_FIELDS` optionally provides comma-separated Jira field ids for acceptance criteria
+- `JIRA_ROOT_CAUSE_FIELDS` optionally provides comma-separated Jira field ids for Root cause
+
+## Known Field IDs
+
+- Root cause: `customfield_12415`
+
+## updateIssue() — Field Update Guide
+
+The `updateIssue(issueKey, updateData)` method updates Jira issue fields. **Important:** pass field objects directly—the method automatically wraps them in `{ fields: ... }`.
+
+### ✅ Correct Usage
+
+```javascript
+// Update a single field
+jira.updateIssue('CNSSNG-52183', {
+  customfield_12415: 'Root cause description here'
+});
+
+// Update multiple fields at once
+jira.updateIssue('CNSSNG-52183', {
+  summary: 'New title',
+  description: 'New description',
+  customfield_12415: 'Root cause'
+});
+
+// Update custom fields with structured values
+jira.updateIssue('CNSSNG-52183', {
+  assignee: { name: 'user.name' },
+  priority: { name: 'High' }
+});
+```
+
+### ❌ Common Mistakes
+
+```javascript
+// ❌ DO NOT double-wrap in { fields: ... }
+// The method does this automatically!
+jira.updateIssue('CNSSNG-52183', {
+  fields: { customfield_12415: 'text' }  // ← Double wrap! Use without outer fields:
+});
+
+// ❌ DO NOT use { update: ... } format for simple updates
+// This format is for bulk operations/transitions, not field updates
+jira.updateIssue('CNSSNG-52183', {
+  update: { customfield_12415: [{ set: 'text' }] }  // ← Wrong format!
+});
+```

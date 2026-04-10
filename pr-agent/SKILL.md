@@ -73,6 +73,38 @@ For `updatePR.js`:
 - Description sources are mutually exclusive: use only one of `--description`, `--description-file`, or `--description-stdin`
 - Both `--flag value` and `--flag=value` formats are accepted
 
+## PR Description Standard (Mandatory)
+
+When updating a PR description with this skill, always use the following section order and headings.
+Do not omit headings. Keep `XPath(s) Changed` as `Yes` or `No`.
+
+Required template:
+
+```md
+**Description:**
+
+<Description of the pull request here. Include full description of the change/feature with any relevant caveats. Reviewers should understand the full context without having to look elsewhere. Exception: for very large features, use a brief summary and a design document link.>
+
+**UT/IT Cases:**
+
+<List all UT/IT cases executed for this PR.>
+
+**Self-review:**
+
+<List issues found during self-review. If none, state "None".>
+
+**XPath(s) Changed:** <Yes/No>
+
+**RCA:**
+
+<Describe the root cause in detail. Applicable for bugs; if not a bug, state "N/A - Feature change".>
+```
+
+Default behavior for this skill:
+- If user asks to update PR description and does not provide a format, use this template.
+- If user provides content in another structure, transform it into this template before calling `updatePR.js`.
+- Prefer `--description-file` for multiline updates.
+
 ## Usage
 Set the following environment variables for authentication:
 - `BITBUCKET_TOKEN` (required for Bitbucket)

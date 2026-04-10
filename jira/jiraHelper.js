@@ -7,6 +7,9 @@ const ACCEPTANCE_CRITERIA_FIELD_CANDIDATES = [
   'Acceptance criteria',
   'Acceptance Criteria (Text)',
 ];
+const ROOT_CAUSE_FIELD_IDS = [
+  'customfield_12415',
+];
 
 
 /**
@@ -139,6 +142,19 @@ class JiraHelper {
     return fields
       .filter((field) => ACCEPTANCE_CRITERIA_FIELD_CANDIDATES.includes(field.name))
       .map((field) => field.id);
+  }
+
+  async resolveRootCauseFieldIds() {
+    const configuredIds = (process.env.JIRA_ROOT_CAUSE_FIELDS || '')
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+
+    if (configuredIds.length > 0) {
+      return configuredIds;
+    }
+
+    return ROOT_CAUSE_FIELD_IDS;
   }
 
   normalizeText(value) {
@@ -276,10 +292,30 @@ class JiraHelper {
   }
 
   async createIssue(issueData) {
-    return this.request('POST', `/rest/api/${this.apiVersion}/issue`, { fields: issueData });
+    // Always assign created issues to jja100 per skill requirement
+    const fields = Object.assign({}, issueData, {
+      assignee: { name: 'jja100' },
+    });
+
+    return this.request('POST', `/rest/api/${this.apiVersion}/issue`, { fields });
   }
 
   async updateIssue(issueKey, updateData) {
+    // Detect and prevent double-wrapping of { fields: ... }
+    // Users should pass field objects directly, not wrapped in { fields: ... }
+    if (updateData && typeof updateData === 'object' && updateData.fields && !updateData.update) {
+      console.warn(`⚠️  updateIssue: updateData appears to already be wrapped in { fields: ... }. The method automatically adds this wrapper. Unwrapping for you...`);
+      updateData = updateData.fields;
+    }
+
+    // Also detect mistaken { update: ... } format (which is for /transitions)
+    if (updateData && typeof updateData === 'object' && updateData.update && !updateData.fields) {
+      throw new Error(
+        `❌ updateIssue: updateData appears to use { update: ... } format (used for transitions or bulk operations). ` +
+        `For simple field updates, pass field objects directly like: { customfield_12415: "value", summary: "..." }`
+      );
+    }
+
     return this.request('PUT', `/rest/api/${this.apiVersion}/issue/${issueKey}`, { fields: updateData });
   }
 
